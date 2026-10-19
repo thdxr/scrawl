@@ -190,6 +190,27 @@ enum LabCommand {
         #[arg(long)]
         no_backdrop: bool,
     },
+    /// The capture-stack experiment over a pretend screen: one, three or story (three, then the
+    /// pointer unfolds, closes, pastes and leaves).
+    Stack {
+        #[arg(value_enum)]
+        scene: ui::StackLabScene,
+        /// dock (under the capsule), edge (bottom-right, like CleanShot) or none (today).
+        #[arg(long, value_enum, default_value = "dock")]
+        variant: ui::StackLabVariant,
+        #[arg(long)]
+        trace: Option<PathBuf>,
+        #[arg(long, default_value_t = 1)]
+        repeat: u32,
+        #[arg(long)]
+        time_scale: Option<f32>,
+        /// As with Reduce motion on.
+        #[arg(long)]
+        reduced: bool,
+        /// Record the display to this movie (`screencapture -v`).
+        #[arg(long)]
+        record: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2012,6 +2033,35 @@ fn main() -> Result<()> {
                 scene,
                 repeat,
                 backdrop: !no_backdrop,
+            });
+            Ok(())
+        }
+        Command::Lab {
+            command:
+                LabCommand::Stack {
+                    scene,
+                    variant,
+                    trace,
+                    repeat,
+                    time_scale,
+                    reduced,
+                    record,
+                },
+        } => {
+            unsafe {
+                if let Some(trace) = trace {
+                    std::env::set_var("SCRAWL_MOTION_TRACE", trace);
+                }
+                if let Some(scale) = time_scale {
+                    std::env::set_var("SCRAWL_TIME_SCALE", scale.to_string());
+                }
+            }
+            ui::run_stack_lab(ui::StackLabOptions {
+                scene,
+                variant,
+                repeat,
+                reduced,
+                record,
             });
             Ok(())
         }

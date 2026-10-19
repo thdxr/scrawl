@@ -879,10 +879,27 @@ pub fn render_contact_sheet_for_duration(
         sheet.t_ms = duration_ms;
         return sheet;
     }
+    let sizes: Vec<(u32, u32)> = frames.iter().map(|(_, f)| (f.width, f.height)).collect();
+    let ((width, height), cells) = contact_sheet_cells(&sizes);
+    let mut sheet = solid(width, height, SHEET_BG);
+    sheet.t_ms = duration_ms;
+    for ((kf, image), rect) in frames.iter().zip(cells) {
+        blit_scaled(&mut sheet, image, rect, 0.0);
+        draw_keyframe_badge(&mut sheet, rect, kf, SHEET_CHIP_K, image.badge_top_right);
+    }
+    sheet
+}
 
-    let aspects: Vec<f32> = frames
+/// The contact sheet's size in pixels and each frame's cell in it (x, y, w, h), in frame order,
+/// for frames of these sizes (at most `MAX_KEYFRAMES` are laid out).
+pub fn contact_sheet_cells(sizes: &[(u32, u32)]) -> ((u32, u32), Vec<[f32; 4]>) {
+    let sizes = &sizes[..sizes.len().min(MAX_KEYFRAMES)];
+    if sizes.is_empty() {
+        return ((640, 360), Vec::new());
+    }
+    let aspects: Vec<f32> = sizes
         .iter()
-        .map(|(_, f)| (f.width.max(1) as f32 / f.height.max(1) as f32).clamp(0.25, 4.5))
+        .map(|&(w, h)| (w.max(1) as f32 / h.max(1) as f32).clamp(0.25, 4.5))
         .collect();
     let rows = plan_contact_sheet_rows(&aspects);
     let row_aspects: Vec<f32> = rows
@@ -897,11 +914,11 @@ pub fn render_contact_sheet_for_duration(
     let native_row_w = rows
         .iter()
         .map(|r| {
-            let sum_w: u32 = frames[r.clone()].iter().map(|(_, f)| f.width).sum();
+            let sum_w: u32 = sizes[r.clone()].iter().map(|&(w, _)| w).sum();
             sum_w as f32 + gap * r.len().saturating_sub(1) as f32
         })
         .fold(0.0f32, f32::max);
-    let min_inner_w = if frames.len() == 1 { 640.0 } else { 960.0 };
+    let min_inner_w = if sizes.len() == 1 { 640.0 } else { 960.0 };
     let desired_inner_w = native_row_w.max(min_inner_w);
 
     let mut w_inner = if sheet_aspect >= 1.0 {
@@ -953,10 +970,7 @@ pub fn render_contact_sheet_for_duration(
         + row_heights_px.iter().sum::<u32>()
         + SHEET_GAP * rows.len().saturating_sub(1) as u32;
 
-    let mut sheet = solid(width, height, SHEET_BG);
-    sheet.t_ms = duration_ms;
-
-    let mut cells = Vec::with_capacity(frames.len());
+    let mut cells = vec![[0.0f32; 4]; sizes.len()];
     let mut row_y = SHEET_PAD;
     for (r_idx, row) in rows.iter().enumerate() {
         let row_h = row_heights_px[r_idx];
@@ -976,18 +990,11 @@ pub fn render_contact_sheet_for_duration(
             };
             let cell_w = x1.saturating_sub(x0).max(1);
             let cell_x = SHEET_PAD + x0 + j as u32 * SHEET_GAP;
-            let rect = [cell_x as f32, row_y as f32, cell_w as f32, row_h as f32];
-            cells.push((i, rect));
+            cells[i] = [cell_x as f32, row_y as f32, cell_w as f32, row_h as f32];
         }
         row_y += row_h + SHEET_GAP;
     }
-
-    for (i, rect) in cells {
-        let (kf, image) = &frames[i];
-        blit_scaled(&mut sheet, image, rect, 0.0);
-        draw_keyframe_badge(&mut sheet, rect, kf, SHEET_CHIP_K, image.badge_top_right);
-    }
-    sheet
+    ((width, height), cells)
 }
 
 /// An `M:SS.mmm` pill in the bottom-left corner, for `scrawl zoom` cells; `k` is how many frame
