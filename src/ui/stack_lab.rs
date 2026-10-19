@@ -434,9 +434,6 @@ pub fn run(options: Options) {
                                 path.from[1] + (path.to[1] - path.from[1]) * e,
                             ]));
                         }
-                        s.set_trace_owner(
-                            loop_coord.read(cx).native_pill.as_ref().is_none_or(|p| p.is_fully_hidden()),
-                        );
                         for action in s.drain_actions() {
                             motion::trace_event(format!("stack:{action:?}"));
                             if let StackAction::Paste(dir) | StackAction::Open(dir) = &action {

@@ -404,12 +404,14 @@ impl StackModel {
                     [cx - w * 0.5, y, w, h]
                 } else {
                     let i = slot.min(PEEK_VISIBLE - 1) as f32;
-                    let s = 1.0 - PEEK_SCALE * i;
                     let front_h = self
                         .cards
                         .iter()
                         .find(|c| c.leave.is_none())
                         .map_or(h, |c| c.spec.card_size()[1]);
+                    // A card taller than the front one shrinks to its height, so it only ever
+                    // shows below it, never above.
+                    let s = (1.0 - PEEK_SCALE * i) * (front_h / h).min(1.0);
                     // Older cards are smaller and their bottom edges show below the front one.
                     let bottom = top + front_h + PEEK * i;
                     [cx - w * s * 0.5, bottom - h * s, w * s, h * s]
@@ -452,10 +454,12 @@ impl StackModel {
     }
 
     fn stack_hover_zone(&self) -> Option<[f32; 4]> {
+        // A card still in flight starts as the whole screen; counting it would unfold the dock
+        // wherever the pointer happens to be.
         let rects: Vec<[f32; 4]> = self
             .cards
             .iter()
-            .filter(|c| c.leave.is_none())
+            .filter(|c| c.leave.is_none() && !c.landing)
             .map(|c| c.rect.map(|s| s.x))
             .collect();
         let first = *rects.first()?;
@@ -816,6 +820,43 @@ mod tests {
         run(&mut m, 1.0);
         let refolded: Vec<[f32; 4]> = m.frames().iter().map(|f| f.rect).collect();
         assert!((refolded[0][1] - folded[0][1]).abs() < 0.5);
+    }
+
+    #[test]
+    fn a_card_in_flight_does_not_unfold_the_dock_under_a_resting_pointer() {
+        let mut m = StackModel::new(Variant::Dock, geometry());
+        m.timing.auto_close = 100.0;
+        m.set_pointer(Some([300.0, 600.0]));
+        m.push(spec(1), [0.0, 0.0, 1512.0, 982.0]);
+        run(&mut m, 1.0);
+        // The second card starts as the whole screen, over the pointer.
+        m.push(spec(2), [0.0, 0.0, 1512.0, 982.0]);
+        let mut lowest = f32::MIN;
+        for _ in 0..240 {
+            m.advance(1.0 / 120.0);
+            let old = m.frames().iter().find(|f| f.id == 1).unwrap().rect;
+            lowest = lowest.max(old[1]);
+        }
+        let settled = m.frames().iter().find(|f| f.id == 1).unwrap().rect[1];
+        // Straight to its peek slot: never further down the screen (into a column) first.
+        assert!(lowest <= settled + 0.5, "the older card went down to {lowest}, then back to {settled}");
+    }
+
+    #[test]
+    fn older_cards_in_the_folded_dock_only_show_below_the_front_one() {
+        let mut m = StackModel::new(Variant::Dock, geometry());
+        m.timing.auto_close = 100.0;
+        let mut tall = spec(1);
+        tall.sheet_size = [1600.0, 1100.0];
+        m.push(tall, [0.0, 0.0, 1512.0, 982.0]);
+        run(&mut m, 1.0);
+        m.push(spec(2), [0.0, 0.0, 1512.0, 982.0]);
+        run(&mut m, 1.0);
+        let frames = m.frames();
+        let old = frames.iter().find(|f| f.id == 1).unwrap().rect;
+        let front = frames.iter().find(|f| f.id == 2).unwrap().rect;
+        assert!(old[1] >= front[1] - 0.5, "older top {} above the front's {}", old[1], front[1]);
+        assert!(old[1] + old[3] > front[1] + front[3] + 5.0, "its bottom edge peeks out");
     }
 
     #[test]

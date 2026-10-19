@@ -542,20 +542,6 @@ struct Trace {
     channel_values: HashMap<u32, String>,
     pending: Option<Pending>,
     queued_events: Vec<String>,
-    /// Elements drawn by something stepped apart from the capsule (the capture stack): written
-    /// into every frame until replaced, so they don't read as gone between its steps.
-    sticky: Vec<TraceElement>,
-}
-
-type TraceElement = (String, [f32; 4], f32, f32, Option<&'static str>, Option<[f32; 4]>);
-
-/// Replaces the sticky elements (see `Trace::sticky`) with this frame's.
-pub(crate) fn trace_sticky(elements: Vec<TraceElement>) {
-    TRACE.with_borrow_mut(|slot| {
-        if let Some(trace) = slot.as_mut() {
-            trace.sticky = elements;
-        }
-    });
 }
 
 thread_local! {
@@ -606,7 +592,6 @@ pub(crate) fn trace_open(launch: &str, display: [f32; 2]) {
             channel_values: HashMap::new(),
             pending: None,
             queued_events: Vec::new(),
-            sticky: Vec::new(),
         });
     });
 }
@@ -713,10 +698,9 @@ impl Trace {
     }
 
     fn flush_pending(&mut self) {
-        let Some(mut frame) = self.pending.take() else {
+        let Some(frame) = self.pending.take() else {
             return;
         };
-        frame.elements.extend(self.sticky.iter().cloned());
         let n = self.last_t.map_or(1, |last| {
             ((frame.t_ms - last) / (1000.0 / 60.0)).round().max(1.0) as u64
         });

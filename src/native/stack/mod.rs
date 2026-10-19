@@ -9,6 +9,7 @@
 //! drag that carries the contact sheet (⌥: the whole bundle) into another app as a file.
 
 pub mod model;
+mod trace;
 
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -98,8 +99,7 @@ struct Runtime {
     drag_started: bool,
     last_tick: f64,
     shown: bool,
-    /// Writes the trace's frames (`motion::trace_frame`) rather than adding to the capsule's.
-    owns_trace_frames: bool,
+    trace: Option<trace::StackTrace>,
     action_tx: flume::Sender<StackAction>,
 }
 
@@ -283,7 +283,10 @@ impl CaptureStack {
                 drag_started: false,
                 last_tick: motion::now(),
                 shown: false,
-                owns_trace_frames: true,
+                trace: trace::StackTrace::open(
+                    &format!("stack.{variant:?}").to_lowercase(),
+                    [display[2], display[3]],
+                ),
                 action_tx,
             }),
             tick_queued: AtomicBool::new(false),
@@ -406,14 +409,6 @@ impl CaptureStack {
             .collect()
     }
 
-    /// Whether the stack starts the trace's frames (when the capsule, which also traces, is
-    /// hidden) or adds its elements to the capsule's.
-    pub fn set_trace_owner(&self, owns: bool) {
-        if let Ok(mut st) = self.shared.state.lock() {
-            st.owns_trace_frames = owns;
-        }
-    }
-
     pub fn drain_actions(&self) -> Vec<StackAction> {
         self.action_rx.try_iter().collect()
     }
@@ -511,7 +506,7 @@ impl Shared {
         }
         st.model.advance(dt);
         st.render(pointer);
-        if motion::tracing() {
+        if st.trace.is_some() {
             st.trace();
         }
         if st.model.is_empty() && st.pretend.is_none() {
@@ -611,43 +606,24 @@ impl Shared {
 }
 
 impl Runtime {
-    fn trace(&self) {
+    fn trace(&mut self) {
         let frames = self.model.frames();
-        if frames.is_empty() {
-            motion::trace_sticky(Vec::new());
-            return;
-        }
-        if self.owns_trace_frames {
-            motion::trace_frame();
-        }
         let [dx, dy, _, _] = self.display;
         let g = |r: [f32; 4]| [r[0] + dx, r[1] + dy, r[2], r[3]];
-        let mut out = Vec::new();
+        let mut out: Vec<trace::Element> = Vec::new();
         for f in &frames {
             let card = g(f.rect);
             out.push((format!("card:{}", f.id), card, f.opacity, f.radius, None, None));
             if f.frame_alpha > 0.001 {
-                out.push((
-                    format!("frame:{}", f.id),
-                    g(f.frame),
-                    f.frame_alpha * f.opacity,
-                    0.0,
-                    Some("card"),
-                    Some(card),
-                ));
+                out.push((format!("frame:{}", f.id), g(f.frame), f.frame_alpha * f.opacity, 0.0, Some("card"), Some(card)));
             }
             if f.hover > 0.001 {
-                out.push((
-                    format!("paste:{}", f.id),
-                    g(f.paste),
-                    f.hover * f.opacity,
-                    0.0,
-                    Some("card"),
-                    Some(card),
-                ));
+                out.push((format!("paste:{}", f.id), g(f.paste), f.hover * f.opacity, 0.0, Some("card"), Some(card)));
             }
         }
-        motion::trace_sticky(out);
+        if let Some(t) = self.trace.as_mut() {
+            t.frame(&out, Vec::new());
+        }
     }
 
     fn perform(&mut self, hit: Hit) {
