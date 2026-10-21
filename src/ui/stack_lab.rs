@@ -236,6 +236,7 @@ fn make_captures(dir: &Path, size: [u32; 2]) -> anyhow::Result<Vec<LabCapture>> 
             segments: Vec::new(),
             words: Vec::new(),
             estimated: false,
+            missing: None,
         };
         crate::build_bundle_from_parts(
             &bundle,
